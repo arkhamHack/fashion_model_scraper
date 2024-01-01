@@ -34,14 +34,14 @@ class Zaubacorp:
                 print(self.prod_details_list[0])
         except FileNotFoundError:
             print('No cached data found')
-        self.worker_count = 1
+        self.worker_count = 10
 
     def start_scraping(self, filters_list,start_page, end_page):
         self.filters_list=filters_list
         self.get_catalog_info(start_page, end_page)
         time.sleep(2)
         self.get_product_data()
-        df = pd.DataFrame(self.product_details)
+        df = pd.DataFrame(self.prod_details_list)
         df.to_csv('prod-details.csv')
         df.to_excel('prod-details.xlsx')
 
@@ -59,7 +59,7 @@ class Zaubacorp:
             else:
                 continue
             try:
-                for page_number in range(start_page, end_page):
+                for page_number in range(start_page, 2):
 
                     url=f"https://www.myntra.com/{filter}/"
                     self.driver.get(f"https://www.myntra.com/{filter}?p={page_number}")
@@ -80,7 +80,14 @@ class Zaubacorp:
             else:
                 with open("products-data.pkl", "wb") as fin_fp:
                     shutil.copy(temp_file, 'products-data.pkl')
+        self.driver.quit()
         print('Çlosing Driver')
+    
+    def create_driver(self):
+        options = uc.ChromeOptions()
+        options.headless = False
+        print("creating driver")
+        return uc.Chrome(use_subprocess=True, executable_path=r"chromedriver.exe", option=options)
 
     def get_product_data(self):
         headers = {
@@ -89,13 +96,20 @@ class Zaubacorp:
         }
         print('Started Product Detail Extraction Function')
         def process_product_item(product):
-            # response = requests.request("GET", product['product_url'], headers=headers)
-            # product_update = self.extract_prod_data(response.text)
-            product_update = self.extract_prod_data(product['product_url'])
-            product.update(product_update)
+            driver = self.create_driver()
+            try:
+                product_update = self.extract_prod_data(driver, product['product_url'])
+                print(product_update)
+                product.update(product_update)
+                print("hi2")
+            finally:
+                driver.close()
+
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.worker_count) as executor:
-            futures = [executor.submit(process_product_item, prod) for prod in self.prod_details_list]
+            futures = [executor.submit(process_product_item, prod) for prod in self.prod_details_list[:10]]
             concurrent.futures.wait(futures)
+
         # print("dsfsdgasdg",self.prod_details_list[:1][0])
         # process_product_item(self.prod_details_list[:1][0])
         df = pd.DataFrame(self.prod_details_list)
@@ -131,12 +145,12 @@ class Zaubacorp:
             outfile.write(str(data))
     
     # @staticmethod
-    def extract_prod_data(self, url):
+    def extract_prod_data(self,driver,url):
         print(url)
-        self.driver.get(url)
-        product_name = self.driver.find_element(By.XPATH, '//*[@id="mountRoot"]//h1[@class="pdp-name"]').text.strip() if self.driver.find_element(By.XPATH,'//h1[@class="pdp-name"]') else None    
-        brand_name = self.driver.find_element(By.XPATH,'//h1[@class="pdp-title"]').text.strip() if self.driver.find_element(By.XPATH,'//h1[@class="pdp-title"]') else None    
-        image_elements = self.driver.find_elements(By.XPATH, '//*[@class="image-grid-image"]')
+        driver.get(url)
+        product_name = driver.find_element(By.XPATH, '//*[@id="mountRoot"]//h1[@class="pdp-name"]').text.strip() if driver.find_element(By.XPATH,'//h1[@class="pdp-name"]') else None    
+        brand_name = driver.find_element(By.XPATH,'//h1[@class="pdp-title"]').text.strip() if driver.find_element(By.XPATH,'//h1[@class="pdp-title"]') else None    
+        image_elements = driver.find_elements(By.XPATH, '//*[@class="image-grid-image"]')
         image_urls=[]
         for element in image_elements:
             style_attribute = element.get_attribute('style')
@@ -146,9 +160,9 @@ class Zaubacorp:
                     image_url = url = match.group(1)
                     image_urls.append(image_url)
 
-        sizes = [size_element.text.strip() for size_element in self.driver.find_elements(By.XPATH, '//*[contains(@class, "size-buttons-unified-size")]')]
-        prod_details = self.driver.find_element(By.XPATH, '//*[@class="pdp-product-description-content"]').text.strip()
-        prod_extradata = [p.text.strip() for p in self.driver.find_elements(By.XPATH, '//*[@class="pdp-sizeFitDescContent pdp-product-description-content"]')]
+        sizes = [size_element.text.strip() for size_element in driver.find_elements(By.XPATH, '//*[contains(@class, "size-buttons-unified-size")]')]
+        prod_details = driver.find_element(By.XPATH, '//*[@class="pdp-product-description-content"]').text.strip()
+        prod_extradata = [p.text.strip() for p in driver.find_elements(By.XPATH, '//*[@class="pdp-sizeFitDescContent pdp-product-description-content"]')]
         output={
             "brand":brand_name,
             "product_name":product_name,
@@ -158,6 +172,7 @@ class Zaubacorp:
             "product_material_n_fit":prod_extradata,
         }
         # print(output)
+        print(output)
         time.sleep(1)
         return output
 
@@ -166,22 +181,13 @@ class Zaubacorp:
     
 
 if __name__ == "__main__":
-    # filters_string = input("Enter a list of filters (most likely roc. eg: RoC-Delhi RoC-Mumbai) (space or comma-separated): ")
-    # filters_list = [s.strip() for s in re.split(r'[,\s]+', filters_string)]
+    filters_string = input("Enter a list of filters (e.g., men-casual-shirts) separated by spaces: ")
+    filters_list = filters_string.split()
+    
+    if not filters_list:
+        print("No filters provided. Exiting.")
+        exit()
+
     filters_list=["men-casual-shirts"]
     zaubacorp_obj = Zaubacorp()
     zaubacorp_obj.start_scraping(filters_list,1,1)
-# zaubacorp_obj.get_company_emails()
-
-# start_page = 1                 start_page = 2
-# //*[@id="table"]/tbody/tr[1]   //*[@id="table"]/tbody/tr[1]
-# //*[@id="table"]/tbody/tr[2]   //*[@id="table"]/tbody/tr[2]
-# .
-# .
-# .
-# //*[@id="table"]/tbody/tr[30]
-
-# //*[@id="block-system-main"]/div[2]/div[1]/text()[4]
-# //*[@id="block-system-main"]/div[2]/div[1]/text()[4]
-
-# Email Xpath : //*[@id="block-system-main"]/div[2]/div[1]/div[5]/div/div[1]/p[1]/text()
